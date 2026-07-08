@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Mutual Non-Disclosure Agreement (MNDA)",
+    "description": "Common Paper's standard Mutual NDA for protecting confidential information exchanged between two parties negotiating or engaged in a business relationship.",
+    "filename": "mutual-nda.md"
+  },
+  {
+    "name": "Mutual NDA Cover Page",
+    "description": "Cover Page used to execute the Mutual NDA. Deal-specific terms are entered here and it incorporates the MNDA Standard Terms by reference to form the complete executed agreement.",
+    "filename": "mutual-nda-coverpage.md"
+  },
+  {
+    "name": "Cloud Service Agreement (CSA)",
+    "description": "Common Paper's standard agreement for selling and buying cloud software and SaaS products, covering subscriptions, fees, data protection, warranties, and liability.",
+    "filename": "csa.md"
+  },
+  {
+    "name": "Design Partner Agreement",
+    "description": "Common Paper's standard agreement for early-stage companies to collaborate with design partners who test a product in development and provide feedback, typically at no cost.",
+    "filename": "design-partner-agreement.md"
+  },
+  {
+    "name": "Service Level Agreement (SLA)",
+    "description": "Common Paper's standard SLA defining uptime commitments and service credits, designed to be used alongside the Common Paper Cloud Service Agreement (CSA).",
+    "filename": "sla.md"
+  },
+  {
+    "name": "Professional Services Agreement (PSA)",
+    "description": "Common Paper's standard agreement governing the delivery of professional or consulting services, including statements of work, deliverables, and payment terms.",
+    "filename": "psa.md"
+  },
+  {
+    "name": "Data Processing Agreement (DPA)",
+    "description": "Common Paper's standard agreement governing the processing of personal data between a data controller and processor, addressing privacy and data protection compliance.",
+    "filename": "dpa.md"
+  },
+  {
+    "name": "Software License Agreement",
+    "description": "Common Paper's standard agreement for licensing on-premise or self-hosted software, as opposed to cloud-delivered software covered by the CSA.",
+    "filename": "software-license-agreement.md"
+  },
+  {
+    "name": "Partnership Agreement",
+    "description": "Common Paper's standard agreement governing business partnerships between two companies, such as referral, reseller, or joint go-to-market arrangements.",
+    "filename": "partnership-agreement.md"
+  },
+  {
+    "name": "Pilot Agreement",
+    "description": "Common Paper's standard short-term trial or evaluation agreement that allows a prospective customer to test a product or service before committing to a longer-term deal.",
+    "filename": "pilot-agreement.md"
+  },
+  {
+    "name": "Business Associate Agreement (BAA)",
+    "description": "Common Paper's standard HIPAA-required agreement governing the handling of protected health information (PHI) between a covered entity and a business associate.",
+    "filename": "baa.md"
+  },
+  {
+    "name": "AI Addendum",
+    "description": "Common Paper's standard supplemental terms addressing the use of artificial intelligence and machine learning within a primary commercial agreement.",
+    "filename": "ai-addendum.md"
+  }
+]
