@@ -23,6 +23,9 @@ htmlcov/
 *.log
 instance/
 .ipynb_checkpoints
+backend/data/
+backend/static/
+*.db
 
 # --- Node / Next.js ---
 node_modules/

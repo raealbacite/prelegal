@@ -1,0 +1,17 @@
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/tests
+
+backend/.venv
+backend/data
+backend/static
+backend/**/__pycache__
+backend/.pytest_cache
+
+**/.DS_Store
