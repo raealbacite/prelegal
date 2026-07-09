@@ -6,7 +6,7 @@ This is a SaaS product to allow users to draft legal agreements based on templat
 
 @catalog.json
 
-The current implementation has the Mutual NDA Creator as a client-side prototype (manual form, live preview, PDF download) and the V1 technical foundation (Docker, FastAPI/uv backend, SQLite, start/stop scripts, fake login screen). AI chat, the remaining 10 document types, real authentication, and document persistence have not been built yet.
+The current implementation on `main` has the Mutual NDA Creator as a client-side prototype (manual form, live preview, PDF download). The V1 technical foundation (Docker, FastAPI/uv backend, SQLite, start/stop scripts, fake login screen) is implemented on branch `pl-4-v1-foundation`, pending PR review — see Implementation Status below. AI chat, the remaining 10 document types, real authentication, and document persistence have not been built yet.
 
 ## Development process
 
@@ -67,7 +67,7 @@ scripts/stop-windows.ps1
 - Mutual NDA Creator prototype: manual form, live preview, and PDF download
 - Client-side only, no backend involved
 
-### Completed (PL-4)
+### PL-4 — In review, not yet merged ([PR #5](https://github.com/raealbacite/prelegal/pull/5), branch `pl-4-v1-foundation`, Jira status: In Progress)
 
 - Docker multi-stage build (Node frontend build stage + Python/uv backend stage)
 - FastAPI backend in `backend/` (uv project) with a `GET /api/health` endpoint
@@ -75,6 +75,8 @@ scripts/stop-windows.ps1
 - Next.js static export (`output: "export"`) served by FastAPI at `http://localhost:8000`
 - Fake login screen (name/email, no validation, no backend call) that gates entry to the Mutual NDA Creator — real authentication is not implemented
 - Start/stop scripts for Mac, Linux, and Windows (`scripts/`)
+
+This work is implemented and tested but lives on the `pl-4-v1-foundation` branch until the PR merges — `main` does not have a `backend/`, `Dockerfile`, or `scripts/` yet. Update this to "Completed" once merged.
 
 ### Not yet built
 
