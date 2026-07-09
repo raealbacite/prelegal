@@ -11,8 +11,8 @@ FROM python:3.12-slim AS backend
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app/backend
-COPY backend/pyproject.toml ./
-RUN uv sync --no-install-project
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --frozen --no-install-project
 
 COPY backend/app ./app
 COPY --from=frontend-build /app/frontend/out ./static

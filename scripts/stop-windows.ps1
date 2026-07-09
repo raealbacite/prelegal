@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 $ContainerName = "prelegal"
 
