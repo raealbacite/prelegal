@@ -1,6 +1,5 @@
+import { apiFetch } from "./api";
 import { DocumentTemplate } from "./types";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
 const cache = new Map<string, DocumentTemplate>();
 
@@ -12,17 +11,14 @@ export async function fetchDocumentTemplate(filename: string): Promise<DocumentT
   const cached = cache.get(filename);
   if (cached) return cached;
 
-  let response: Response;
+  let doc: DocumentTemplate;
   try {
-    response = await fetch(`${API_BASE}/api/documents/${encodeURIComponent(filename)}`);
+    doc = await apiFetch<DocumentTemplate>(`/api/templates/${encodeURIComponent(filename)}`, {
+      auth: false,
+    });
   } catch {
-    throw new Error("Couldn't load the document template. Check your connection and try again.");
-  }
-  if (!response.ok) {
     throw new Error(`Couldn't load the document template (${filename}).`);
   }
-
-  const doc: DocumentTemplate = await response.json();
   cache.set(filename, doc);
   return doc;
 }

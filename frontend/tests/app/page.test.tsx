@@ -1,23 +1,55 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "@/app/page";
+import { AuthProvider } from "@/lib/authContext";
+
+function renderHome() {
+  return render(
+    <AuthProvider>
+      <Home />
+    </AuthProvider>,
+  );
+}
 
 describe("Home", () => {
-  it("shows the login screen first, then the Document Creator after continuing", async () => {
-    const user = userEvent.setup();
-    render(<Home />);
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
 
-    expect(screen.getByRole("heading", { name: /welcome to prelegal/i })).toBeInTheDocument();
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the auth screen when signed out", async () => {
+    renderHome();
+
+    expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /legal document creator/i }),
     ).not.toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+  it("signs in and reveals the document creator", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ token: "tok", user: { id: 1, email: "jane@example.com" } }),
+      })) as unknown as typeof fetch,
+    );
 
-    expect(screen.getByRole("heading", { name: /legal document creator/i })).toBeInTheDocument();
+    renderHome();
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByLabelText(/email/i), "jane@example.com");
+    await user.type(screen.getByLabelText(/password/i), "supersecret");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
     expect(
-      screen.queryByRole("heading", { name: /welcome to prelegal/i }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("heading", { name: /legal document creator/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
   });
 });

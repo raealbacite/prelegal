@@ -19,6 +19,30 @@ def test_init_db_creates_empty_users_table(tmp_path):
     assert rows == 0
 
 
+def test_init_db_creates_empty_documents_table(tmp_path):
+    db_path = tmp_path / "prelegal.db"
+
+    init_db(db_path)
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)")}
+        rows = connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert columns == {
+        "id",
+        "user_id",
+        "title",
+        "document_type",
+        "fields_json",
+        "created_at",
+        "updated_at",
+    }
+    assert rows == 0
+
+
 def test_init_db_resets_existing_data(tmp_path):
     db_path = tmp_path / "prelegal.db"
 

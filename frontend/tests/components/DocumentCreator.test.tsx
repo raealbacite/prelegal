@@ -44,9 +44,13 @@ let chatQueue: unknown[] = [];
 function installFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
-      if (url.startsWith("/api/documents/")) {
+    vi.fn(async (url: string, options?: { method?: string }) => {
+      if (url.startsWith("/api/templates/")) {
         return { ok: true, json: async () => CSA_DOC };
+      }
+      // Auto-save on download posts to /api/documents.
+      if (url === "/api/documents" && options?.method === "POST") {
+        return { ok: true, status: 201, json: async () => ({ id: 1 }) };
       }
       // /api/chat
       return { ok: true, json: async () => chatQueue.shift() };
@@ -110,5 +114,42 @@ describe("DocumentCreator", () => {
     // Not all fields are filled, so download stays disabled with a hint.
     expect(screen.getByRole("button", { name: /download pdf/i })).toBeDisabled();
     expect(screen.getByText(/fields still needed/i)).toBeInTheDocument();
+  });
+
+  it("saves the document to history when Save is clicked", async () => {
+    const user = userEvent.setup();
+    chatQueue = [CSA_TURN];
+    render(<DocumentCreator />);
+
+    await send(user, "I need a cloud service agreement");
+    await screen.findByText("Cloud Service Agreement (CSA)");
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(await screen.findByText(/saved to my documents/i)).toBeInTheDocument();
+  });
+
+  it("shows an error when saving fails", async () => {
+    const user = userEvent.setup();
+    chatQueue = [CSA_TURN];
+    // Make the save POST fail while chat/template calls still succeed.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, options?: { method?: string }) => {
+        if (url.startsWith("/api/templates/")) return { ok: true, json: async () => CSA_DOC };
+        if (url === "/api/documents" && options?.method === "POST") {
+          return { ok: false, status: 500, json: async () => ({ detail: "boom" }) };
+        }
+        return { ok: true, json: async () => chatQueue.shift() };
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DocumentCreator />);
+    await send(user, "I need a cloud service agreement");
+    await screen.findByText("Cloud Service Agreement (CSA)");
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(await screen.findByText(/couldn't save/i)).toBeInTheDocument();
   });
 });

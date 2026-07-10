@@ -29,7 +29,7 @@ describe("fetchDocumentTemplate", () => {
     expect(second).toEqual(DOC);
     // Second call served from cache — fetch only happened once.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(calledUrl).toBe("/api/documents/csa.md");
+    expect(calledUrl).toBe("/api/templates/csa.md");
   });
 
   it("throws a friendly error on a non-OK response", async () => {

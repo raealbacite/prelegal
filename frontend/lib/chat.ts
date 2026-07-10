@@ -1,3 +1,4 @@
+import { apiFetch } from "./api";
 import { FieldsBag } from "./types";
 
 export interface ChatMessage {
@@ -29,8 +30,6 @@ export function mergeFields(current: FieldsBag, patch: FieldsBag): FieldsBag {
   return next;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
-
 /**
  * Send the conversation so far, the current document type, and the collected
  * fields to the backend, and return the assistant's reply, resolved document
@@ -41,27 +40,9 @@ export async function sendChat(
   documentType: string | null,
   fields: FieldsBag,
 ): Promise<ChatTurnResult> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, documentType, fields }),
-    });
-  } catch {
-    throw new Error("Couldn't reach the assistant. Check your connection and try again.");
-  }
-
-  if (!response.ok) {
-    let detail = "The assistant is unavailable right now. Please try again.";
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      /* keep the default message */
-    }
-    throw new Error(detail);
-  }
-
-  return response.json();
+  return apiFetch<ChatTurnResult>("/api/chat", {
+    method: "POST",
+    body: { messages, documentType, fields },
+    connectionErrorMessage: "Couldn't reach the assistant. Check your connection and try again.",
+  });
 }

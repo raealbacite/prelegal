@@ -9,6 +9,7 @@ import GenericPreview from "./GenericPreview";
 import GenericPdfDocument from "./GenericPdfDocument";
 import { ChatTurnResult, mergeFields } from "@/lib/chat";
 import { fetchDocumentTemplate } from "@/lib/documentClient";
+import { saveDocument } from "@/lib/documentsStore";
 import { isDocComplete, missingFieldNames, pdfFileName } from "@/lib/genericDoc";
 import { adaptFieldsToNdaFormData } from "@/lib/ndaFieldAdapter";
 import { isFormComplete } from "@/lib/ndaDefaults";
@@ -17,13 +18,26 @@ import { DocumentTemplate, FieldsBag } from "@/lib/types";
 const MNDA_FILENAMES = ["mutual-nda.md", "mutual-nda-coverpage.md"];
 const isMnda = (filename: string | null) => filename !== null && MNDA_FILENAMES.includes(filename);
 
-export default function DocumentCreator() {
-  const [documentType, setDocumentType] = useState<string | null>(null);
-  const [fields, setFields] = useState<FieldsBag>({});
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+interface DocumentCreatorProps {
+  /** Seed the document type when re-opening a saved document. */
+  initialDocumentType?: string | null;
+  /** Seed the collected fields when re-opening a saved document. */
+  initialFields?: FieldsBag;
+}
+
+export default function DocumentCreator({
+  initialDocumentType = null,
+  initialFields,
+}: DocumentCreatorProps = {}) {
+  const [documentType, setDocumentType] = useState<string | null>(initialDocumentType);
+  const [fields, setFields] = useState<FieldsBag>(initialFields ?? {});
   const [loadedDoc, setLoadedDoc] = useState<DocumentTemplate | null>(null);
   const [erroredFilename, setErroredFilename] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
 
   // Load the template for a non-NDA document once it's chosen (the NDA uses its
   // own bespoke renderer and needs no fetch). State is only set from the async
@@ -56,9 +70,33 @@ export default function DocumentCreator() {
   function handleResult(result: ChatTurnResult) {
     setFields((prev) => mergeFields(prev, result.fields));
     if (result.documentType) setDocumentType(result.documentType);
+    // A new chat turn changes the document, so any prior "Saved" note is stale.
+    setSaveState("idle");
   }
 
   const ndaData = useMemo(() => adaptFieldsToNdaFormData(fields), [fields]);
+
+  const docTitle = useMemo(
+    () => buildTitle(documentType, docTemplate, ndaData, fields),
+    [documentType, docTemplate, ndaData, fields],
+  );
+
+  // Persist the current document for the signed-in user. Best-effort: callers
+  // decide how to reflect success/failure; the download flow never blocks on it.
+  async function persist(): Promise<boolean> {
+    if (!documentType) return false;
+    try {
+      await saveDocument({ title: docTitle, documentType, fields });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleSave() {
+    setSaveState("saving");
+    setSaveState((await persist()) ? "saved" : "error");
+  }
 
   const complete = isMnda(documentType)
     ? isFormComplete(ndaData)
@@ -87,6 +125,8 @@ export default function DocumentCreator() {
       link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
+      // Downloading is the natural "generated" moment — save it to history too.
+      if (await persist()) setSaveState("saved");
     } catch {
       setDownloadError(true);
     } finally {
@@ -109,14 +149,34 @@ export default function DocumentCreator() {
         />
         {documentType && (isMnda(documentType) || docTemplate) ? (
           <>
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={!complete || isDownloading}
-              className="self-start rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              {isDownloading ? "Preparing PDF..." : "Download PDF"}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={!complete || isDownloading}
+                className="rounded-full bg-purple-secondary px-5 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isDownloading ? "Preparing PDF..." : "Download PDF"}
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saveState === "saving"}
+                className="rounded-full border border-purple-secondary px-5 py-2.5 text-sm font-medium text-purple-secondary transition hover:bg-purple-secondary/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {saveState === "saving" ? "Saving..." : "Save"}
+              </button>
+              {saveState === "saved" ? (
+                <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                  Saved to My Documents ✓
+                </span>
+              ) : null}
+              {saveState === "error" ? (
+                <span className="text-xs text-red-600 dark:text-red-400">
+                  Couldn&apos;t save. Please try again.
+                </span>
+              ) : null}
+            </div>
             {!complete ? <IncompleteHint documentType={documentType} docTemplate={docTemplate} fields={fields} /> : null}
             {downloadError ? (
               <p className="text-xs text-red-600 dark:text-red-400">
@@ -163,6 +223,21 @@ function DocumentPane({
     return <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading document…</p>;
   }
   return <GenericPreview doc={docTemplate} fields={fields} />;
+}
+
+/** A human title for a saved document: the document name plus a distinguishing
+ * party if we have one, so the history list is scannable. */
+function buildTitle(
+  documentType: string | null,
+  docTemplate: DocumentTemplate | null,
+  ndaData: ReturnType<typeof adaptFieldsToNdaFormData>,
+  fields: FieldsBag,
+): string {
+  const base = isMnda(documentType) ? "Mutual NDA" : (docTemplate?.name ?? "Document");
+  const party = isMnda(documentType)
+    ? ndaData.partyA.companyName || ndaData.partyB.companyName
+    : (fields.Customer ?? fields.Provider ?? Object.values(fields).find((v) => v.trim()));
+  return party ? `${base} — ${party}` : base;
 }
 
 function IncompleteHint({

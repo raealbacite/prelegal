@@ -3,6 +3,23 @@ from app.llm import ChatResponse, LLMConfigError
 from fastapi.testclient import TestClient
 
 
+def _auth_headers(client) -> dict[str, str]:
+    """Sign up a user and return an Authorization header for the protected chat."""
+    response = client.post(
+        "/api/auth/signup", json={"email": "chat@example.com", "password": "supersecret"}
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def test_chat_requires_authentication():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
+        )
+    assert response.status_code == 401
+
+
 def test_chat_returns_reply_document_and_field_patch(monkeypatch):
     def fake_generate(messages, document_type, fields):
         assert messages[-1].content == "Let's do a cloud services agreement"
@@ -17,6 +34,7 @@ def test_chat_returns_reply_document_and_field_patch(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post(
             "/api/chat",
+            headers=_auth_headers(client),
             json={"messages": [{"role": "user", "content": "Let's do a cloud services agreement"}]},
         )
 
@@ -40,6 +58,7 @@ def test_chat_forwards_document_type_and_current_fields(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post(
             "/api/chat",
+            headers=_auth_headers(client),
             json={
                 "messages": [{"role": "user", "content": "hi"}],
                 "documentType": "csa.md",
@@ -61,6 +80,7 @@ def test_chat_returns_503_when_not_configured(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post(
             "/api/chat",
+            headers=_auth_headers(client),
             json={"messages": [{"role": "user", "content": "hi"}]},
         )
 
@@ -77,6 +97,7 @@ def test_chat_returns_502_on_llm_failure(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post(
             "/api/chat",
+            headers=_auth_headers(client),
             json={"messages": [{"role": "user", "content": "hi"}]},
         )
 
@@ -86,7 +107,7 @@ def test_chat_returns_502_on_llm_failure(monkeypatch):
 
 def test_get_document_template_returns_fields(monkeypatch):
     with TestClient(main.app) as client:
-        response = client.get("/api/documents/csa.md")
+        response = client.get("/api/templates/csa.md")
 
     assert response.status_code == 200
     body = response.json()
@@ -99,5 +120,5 @@ def test_get_document_template_returns_fields(monkeypatch):
 
 def test_get_document_template_unknown_returns_404():
     with TestClient(main.app) as client:
-        response = client.get("/api/documents/nope.md")
+        response = client.get("/api/templates/nope.md")
     assert response.status_code == 404

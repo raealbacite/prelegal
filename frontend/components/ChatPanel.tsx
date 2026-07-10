@@ -103,7 +103,7 @@ export default function ChatPanel({ documentType, fields, onResult }: ChatPanelP
         <button
           type="submit"
           disabled={isSending || !input.trim()}
-          className="shrink-0 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+          className="shrink-0 rounded-full bg-purple-secondary px-5 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Send
         </button>
