@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { pdf } from "@react-pdf/renderer";
-import NDAForm from "./NDAForm";
+import ChatPanel from "./ChatPanel";
 import NDAPreview from "./NDAPreview";
 import NdaPdfDocument from "./NdaPdfDocument";
 import { createDefaultFormData, isFormComplete } from "@/lib/ndaDefaults";
@@ -34,7 +34,7 @@ export default function NdaCreator() {
   return (
     <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
       <div>
-        <NDAForm data={data} onChange={setData} />
+        <ChatPanel data={data} onChange={setData} />
       </div>
       <div className="flex flex-col gap-4">
         <NDAPreview data={data} />

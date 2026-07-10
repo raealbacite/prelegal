@@ -18,8 +18,9 @@ export default function Home() {
           Mutual NDA Creator
         </h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Fill in the details below to generate a Mutual Non-Disclosure Agreement based on the
-          Common Paper standard MNDA, then download it as a PDF.
+          Chat with the assistant to build a Mutual Non-Disclosure Agreement based on the Common
+          Paper standard MNDA. It asks about the details, fills in the document as you go, and you
+          can download it as a PDF.
         </p>
       </header>
       <NdaCreator />
