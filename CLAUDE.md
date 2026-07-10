@@ -6,7 +6,7 @@ This is a SaaS product to allow users to draft legal agreements based on templat
 
 @catalog.json
 
-The current implementation on `main` has the Mutual NDA Creator as a client-side prototype (manual form, live preview, PDF download). The V1 technical foundation (Docker, FastAPI/uv backend, SQLite, start/stop scripts, fake login screen) is implemented on branch `pl-4-v1-foundation`, pending PR review — see Implementation Status below. AI chat, the remaining 10 document types, real authentication, and document persistence have not been built yet.
+The current implementation on `main` has the Mutual NDA Creator driven by a free-form AI chat: the assistant asks about the document, gathers the fields conversationally, and populates a live preview that downloads as a PDF. The chat is backed by a `POST /api/chat` endpoint (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b` via Cerebras, Structured Outputs). This runs on the V1 technical foundation: a Dockerized FastAPI/uv backend, SQLite rebuilt on each start, start/stop scripts, and a fake login screen gating the app. The remaining 10 document types, real authentication, and document persistence have not been built yet.
 
 ## Development process
 
@@ -58,16 +58,16 @@ scripts/stop-windows.ps1
 
 ## Implementation Status
 
-### Completed (PL-2)
+### PL-2 — ✅ Completed
 
 - CommonPaper legal agreement templates added to `templates/`
 
-### Completed (PL-3)
+### PL-3 — ✅ Completed
 
 - Mutual NDA Creator prototype: manual form, live preview, and PDF download
 - Client-side only, no backend involved
 
-### PL-4 — In review, not yet merged ([PR #5](https://github.com/raealbacite/prelegal/pull/5), branch `pl-4-v1-foundation`, Jira status: In Progress)
+### PL-4 — ✅ Completed (merged via [PR #5](https://github.com/raealbacite/prelegal/pull/5))
 
 - Docker multi-stage build (Node frontend build stage + Python/uv backend stage)
 - FastAPI backend in `backend/` (uv project) with a `GET /api/health` endpoint
@@ -76,15 +76,26 @@ scripts/stop-windows.ps1
 - Fake login screen (name/email, no validation, no backend call) that gates entry to the Mutual NDA Creator — real authentication is not implemented
 - Start/stop scripts for Mac, Linux, and Windows (`scripts/`)
 
-This work is implemented and tested but lives on the `pl-4-v1-foundation` branch until the PR merges — `main` does not have a `backend/`, `Dockerfile`, or `scripts/` yet. Update this to "Completed" once merged.
+### PL-5 — ✅ Completed (merged via [PR #6](https://github.com/raealbacite/prelegal/pull/6))
 
-### Not yet built
+- Replaced the manual Mutual NDA form with a free-form AI chat (`ChatPanel`) that populates the document from the conversation; live preview and PDF download unchanged
+- `POST /api/chat`: a single structured-output call per turn (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b`, pinned to Cerebras, no streaming) returning the assistant `reply` plus a patch of NDA fields, merged client-side so null/omitted values never overwrite existing ones
+- Assistant suggests sensible legal defaults but confirms before finalizing; graceful in-chat error (503 when `OPENROUTER_API_KEY` is unset, 502 on any LLM failure) with the preview still usable
+- Still Mutual NDA only; `litellm` added to the backend; LLM logic isolated in `backend/app/llm.py`
+
+### ⬜ Not yet built
 
 - Real authentication (signup/signin/signout, JWT, password hashing) and the `users` table logic
-- AI chat interface and Cerebras/OpenRouter integration
 - Support for the other 10 document types from catalog.json
 - Document persistence (save/load/delete)
 
 ## Current API Endpoints
 
 - `GET /api/health` - Health check
+- `POST /api/chat` - Advance the NDA-drafting conversation by one turn; returns the assistant reply and a patch of NDA fields (503 if `OPENROUTER_API_KEY` is unset, 502 on LLM failure)
+
+## Latest Update (2026-07-10)
+
+PL-5 is merged to `main`. The Mutual NDA Creator is now driven by a free-form AI chat instead of a manual form: the frontend `ChatPanel` POSTs the conversation + current field state to `POST /api/chat`, which makes one structured-output call (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b`, Cerebras-pinned, no streaming) returning the assistant reply and a field patch; the existing live preview and PDF download are reused unchanged. `NDAForm` was removed (chat-only, no manual fallback). Verified end-to-end against the real OpenRouter/Cerebras key (function, HTTP route, and a browser smoke test) plus a full Docker rebuild/run; 52 frontend tests and 11 backend tests pass.
+
+Next up (not yet built): real authentication + `users` logic, the other 10 document types, and document persistence.
