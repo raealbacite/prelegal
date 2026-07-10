@@ -83,7 +83,7 @@ scripts/stop-windows.ps1
 - Assistant suggests sensible legal defaults but confirms before finalizing; graceful in-chat error (503 when `OPENROUTER_API_KEY` is unset, 502 on any LLM failure) with the preview still usable
 - Still Mutual NDA only; `litellm` added to the backend; LLM logic isolated in `backend/app/llm.py`
 
-### PL-6 — ✅ Completed
+### PL-6 — ✅ Completed (merged via [PR #7](https://github.com/raealbacite/prelegal/pull/7))
 
 - Expanded from Mutual-NDA-only to **all 12 document types** in `catalog.json` via one document-type-aware `POST /api/chat`. The assistant conversationally identifies which supported document the user wants, redirects requests for unsupported types (e.g. an employment contract) to the closest supported one, and guides field collection
 - Startup **template registry** (`backend/app/registry.py`) parses `catalog.json` + `templates/*.md`, auto-deriving each document's fields from the `<span class="..._link">Label</span>` markers (with possessive/plural normalization). The Mutual NDA keeps an explicit field set so its bespoke renderer is unchanged
@@ -105,6 +105,6 @@ scripts/stop-windows.ps1
 
 ## Latest Update (2026-07-10)
 
-PL-6 is complete (branch `pl-6-all-document-types`). The app is now a Legal Document Creator supporting all 12 `catalog.json` types through a single document-type-aware chat: the assistant identifies the right document (redirecting unsupported requests to the closest supported one) and guides field collection. A startup registry parses the templates to auto-derive fields; non-NDA documents render via a generic template-fill preview/PDF while the Mutual NDA keeps its bespoke renderer via an adapter. Also shipped: focus returns to the chat input after each reply, and the assistant always asks a follow-up question when it needs more info. Verified end-to-end against the real OpenRouter/Cerebras key (unsupported-doc redirection, generic CSA field collection, and MNDA structured fields) plus a full Docker build; 63 frontend tests and 26 backend tests pass.
+PL-6 is merged to `main` (PR #7). The app is now a Legal Document Creator supporting all 12 `catalog.json` types through a single document-type-aware chat: the assistant identifies the right document (redirecting unsupported requests to the closest supported one) and guides field collection. A startup registry parses the templates to auto-derive fields; non-NDA documents render via a generic template-fill preview/PDF while the Mutual NDA keeps its bespoke renderer via an adapter. Also shipped: focus returns to the chat input after each reply, and the assistant always asks a follow-up question when it needs more info. Verified end-to-end against the real OpenRouter/Cerebras key (unsupported-doc redirection, generic CSA field collection, and MNDA structured fields) plus a full Docker build; 63 frontend tests and 26 backend tests pass.
 
 Next up (not yet built): real authentication + `users` logic, and document persistence.
