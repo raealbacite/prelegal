@@ -12,9 +12,9 @@ from app.llm import (
     ChatMessage,
     ChatResponse,
     LLMConfigError,
-    NdaFieldsPatch,
     generate_chat_response,
 )
+from app.registry import DocumentTemplate, get_document, init_registry
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ STATIC_DIR = BACKEND_ROOT / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    init_registry()
     yield
 
 
@@ -47,18 +48,31 @@ def health() -> dict[str, str]:
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    fields: NdaFieldsPatch = NdaFieldsPatch()
+    documentType: str | None = None
+    fields: dict[str, str] = {}
+
+
+@app.get("/api/documents/{filename}")
+def get_document_template(filename: str) -> DocumentTemplate:
+    """Return a supported document's metadata, field list, and raw template so
+    the frontend can render a live preview and PDF for it."""
+    doc = get_document(filename)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"Unknown document: {filename}")
+    return doc
 
 
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> ChatResponse:
-    """Advance the NDA-drafting conversation by one turn.
+    """Advance the document-drafting conversation by one turn.
 
-    Runs a single structured-output LLM call and returns the assistant reply
-    plus a patch of NDA fields to merge into the document.
+    Runs a single structured-output LLM call and returns the assistant reply,
+    the resolved document type, and a patch of fields to merge into the document.
     """
     try:
-        return generate_chat_response(request.messages, request.fields)
+        return generate_chat_response(
+            request.messages, request.documentType, request.fields
+        )
     except LLMConfigError as exc:
         raise HTTPException(
             status_code=503,

@@ -3,17 +3,20 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatPanel from "@/components/ChatPanel";
-import { createDefaultFormData } from "@/lib/ndaDefaults";
-import { NDAFormData } from "@/lib/types";
+import { ChatTurnResult, mergeFields } from "@/lib/chat";
+import { FieldsBag } from "@/lib/types";
 
-function ControlledChatPanel({ onChange }: { onChange?: (data: NDAFormData) => void }) {
-  const [data, setData] = useState(() => createDefaultFormData());
+function ControlledChatPanel({ onResult }: { onResult?: (r: ChatTurnResult) => void }) {
+  const [documentType, setDocumentType] = useState<string | null>(null);
+  const [fields, setFields] = useState<FieldsBag>({});
   return (
     <ChatPanel
-      data={data}
-      onChange={(next) => {
-        setData(next);
-        onChange?.(next);
+      documentType={documentType}
+      fields={fields}
+      onResult={(result) => {
+        setFields((prev) => mergeFields(prev, result.fields));
+        if (result.documentType) setDocumentType(result.documentType);
+        onResult?.(result);
       }}
     />
   );
@@ -32,30 +35,44 @@ describe("ChatPanel", () => {
 
   it("shows the opening greeting", () => {
     render(<ControlledChatPanel />);
-    expect(screen.getByText(/I'll help you put together a Mutual NDA/i)).toBeInTheDocument();
+    expect(screen.getByText(/help you draft a legal agreement/i)).toBeInTheDocument();
   });
 
-  it("sends a message, renders the reply, and merges fields into the document", async () => {
+  it("sends a message, renders the reply, and reports the result", async () => {
     const user = userEvent.setup();
     mockFetchOnce({
-      reply: "Great — I've noted Acme Corp as Party A.",
-      fields: { partyA: { companyName: "Acme Corp" } },
+      reply: "Great — let's draft a Cloud Service Agreement. Who is the Provider?",
+      documentType: "csa.md",
+      fields: { Customer: "Acme Corp" },
     });
-    const onChange = vi.fn();
+    const onResult = vi.fn();
 
-    render(<ControlledChatPanel onChange={onChange} />);
+    render(<ControlledChatPanel onResult={onResult} />);
 
-    await user.type(screen.getByLabelText("Message"), "Party A is Acme Corp");
+    await user.type(screen.getByLabelText("Message"), "I need a cloud service agreement");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    expect(await screen.findByText(/noted Acme Corp as Party A/i)).toBeInTheDocument();
-    expect(screen.getByText("Party A is Acme Corp")).toBeInTheDocument();
+    expect(await screen.findByText(/who is the Provider/i)).toBeInTheDocument();
+    expect(screen.getByText("I need a cloud service agreement")).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalled();
-    });
-    const lastData = onChange.mock.calls.at(-1)![0];
-    expect(lastData.partyA.companyName).toBe("Acme Corp");
+    await waitFor(() => expect(onResult).toHaveBeenCalled());
+    const result = onResult.mock.calls.at(-1)![0];
+    expect(result.documentType).toBe("csa.md");
+    expect(result.fields.Customer).toBe("Acme Corp");
+  });
+
+  it("returns focus to the input after the assistant replies", async () => {
+    const user = userEvent.setup();
+    mockFetchOnce({ reply: "Got it — what's next?", documentType: null, fields: {} });
+
+    render(<ControlledChatPanel />);
+
+    const input = screen.getByLabelText("Message");
+    await user.type(input, "hello");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await screen.findByText(/what's next/i);
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it("shows a graceful error when the assistant is unavailable", async () => {
@@ -64,20 +81,22 @@ describe("ChatPanel", () => {
 
     render(<ControlledChatPanel />);
 
-    await user.type(screen.getByLabelText("Message"), "hello");
+    const input = screen.getByLabelText("Message");
+    await user.type(input, "hello");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
     expect(await screen.findByText(/not configured/i)).toBeInTheDocument();
+    // Focus returns to the input so the user can retry after an error.
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it("does not send an empty message", async () => {
     const user = userEvent.setup();
-    const fetchMock = mockFetchOnce({ reply: "hi", fields: {} });
+    const fetchMock = mockFetchOnce({ reply: "hi", documentType: null, fields: {} });
 
     render(<ControlledChatPanel />);
 
     await user.type(screen.getByLabelText("Message"), "   ");
-    // The send button is disabled for whitespace-only input.
     expect(screen.getByRole("button", { name: /send/i })).toBeDisabled();
     expect(fetchMock).not.toHaveBeenCalled();
   });

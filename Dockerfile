@@ -17,5 +17,10 @@ RUN uv sync --frozen --no-install-project
 COPY backend/app ./app
 COPY --from=frontend-build /app/frontend/out ./static
 
+# The registry reads catalog.json + templates/ from the repo root at startup;
+# place them as siblings of /app/backend so REPO_ROOT resolves the same as in dev.
+COPY catalog.json /app/catalog.json
+COPY templates /app/templates
+
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
