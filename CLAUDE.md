@@ -6,7 +6,7 @@ This is a SaaS product to allow users to draft legal agreements based on templat
 
 @catalog.json
 
-The current implementation on `main` is a Legal Document Creator driven by a free-form AI chat that supports all 12 document types in `catalog.json`: the assistant figures out which supported document the user wants (redirecting unsupported requests to the closest supported one), gathers the fields conversationally, and populates a live preview that downloads as a PDF. The chat is backed by a document-type-aware `POST /api/chat` endpoint (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b` via Cerebras, Structured Outputs). This runs on the V1 technical foundation: a Dockerized FastAPI/uv backend, SQLite rebuilt on each start, start/stop scripts, and a fake login screen gating the app. Real authentication and document persistence have not been built yet.
+The current implementation on `main` is a multi-user Legal Document Creator driven by a free-form AI chat that supports all 12 document types in `catalog.json`: the assistant figures out which supported document the user wants (redirecting unsupported requests to the closest supported one), gathers the fields conversationally, and populates a live preview that downloads as a PDF. The chat is backed by a document-type-aware `POST /api/chat` endpoint (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b` via Cerebras, Structured Outputs). Users sign up and sign in with a real email/password account (bcrypt + JWT), can save generated documents and revisit them from a "My Documents" history, and every screen carries a draft-only legal disclaimer. This runs on the V1 technical foundation: a Dockerized FastAPI/uv backend, SQLite rebuilt on each start (so accounts and saved documents live for the lifetime of a server run), and start/stop scripts.
 
 ## Development process
 
@@ -92,19 +92,34 @@ scripts/stop-windows.ps1
 - **Two fixes shipped with PL-6:** focus returns to the chat input after every assistant reply (success or error); the assistant always ends with a follow-up question when it still needs information (system-prompt rule)
 - Fixed the `Dockerfile` to copy `catalog.json` + `templates/` into the image (the registry reads them at startup)
 
+### PL-7 — ✅ Completed (merged to `main`)
+
+- **Real authentication** replaces the fake login screen. New `backend/app/auth.py`: bcrypt password hashing, JWT (HS256) bearer tokens, case-insensitive emails, and a `get_current_user` dependency. Endpoints `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`; the `users` table is now populated. `/api/chat` is also auth-gated so the costed LLM calls require a signed-in user
+- **Document persistence.** New `documents` table + `backend/app/documents_store.py` (user-scoped save/list/get/delete). Endpoints `GET/POST /api/documents` and `GET/DELETE /api/documents/{id}`. A saved document is `{title, documentType, fields}`; the DB still resets on restart, so this is session-lifetime persistence (per the ticket). The template-metadata endpoint moved from `GET /api/documents/{filename}` to **`GET /api/templates/{filename}`** to free up `/api/documents` for saved docs
+- **Frontend.** `AuthProvider`/`useAuth` context, a branded sign-in/sign-up screen, token in `localStorage`, and automatic sign-out when any authed request returns 401 (stale sessions are expected because the DB resets on restart). A `DocumentCreator` **Save** button plus auto-save on PDF download, and a **My Documents** history view (open/delete). The creator stays mounted while browsing history so an in-progress draft is never lost. A shared `lib/api.ts` `apiFetch`/token layer that `chat.ts` and `documentClient.ts` were refactored onto
+- **SaaS polish.** The brand palette is registered as Tailwind tokens (`accent-yellow`/`blue-primary`/`purple-secondary`/`navy`/`gray-text`); purple submit buttons, navy headings, and a persistent "draft only — not legal advice" disclaimer banner on every screen
+- Tests isolate the DB via `backend/tests/conftest.py`; **43 backend tests and 84 frontend tests pass**; lint, typecheck, and static build clean
+
 ### ⬜ Not yet built
 
-- Real authentication (signup/signin/signout, JWT, password hashing) and the `users` table logic
-- Document persistence (save/load/delete)
+- Persistence that survives a server restart (the DB is intentionally rebuilt on each start)
+- Password reset / email verification, and account management (change password, delete account)
 
 ## Current API Endpoints
 
 - `GET /api/health` - Health check
-- `GET /api/documents/{filename}` - Return a supported document's metadata, auto-derived field list, and raw template (404 if unknown)
-- `POST /api/chat` - Advance the document-drafting conversation by one turn. Request carries `messages`, the current `documentType` (nullable), and the collected `fields`; returns the assistant `reply`, the resolved `documentType`, and a patch of `fields` (503 if `OPENROUTER_API_KEY` is unset, 502 on LLM failure)
+- `POST /api/auth/signup` - Register an account (email + password ≥8 chars); returns a JWT `token` and the `user` (201; 409 if the email is taken; 422 on invalid input)
+- `POST /api/auth/login` - Authenticate; returns a JWT `token` and the `user` (401 on bad credentials)
+- `GET /api/auth/me` - Return the signed-in user; used to validate a stored token (401 if missing/invalid/expired)
+- `GET /api/documents` - List the signed-in user's saved documents, newest first (auth required)
+- `POST /api/documents` - Save a document (`title`, `documentType`, `fields`) for the signed-in user (201; auth required)
+- `GET /api/documents/{id}` - Return one of the signed-in user's saved documents with its field values (404 if not theirs; auth required)
+- `DELETE /api/documents/{id}` - Delete one of the signed-in user's saved documents (204; 404 if not theirs; auth required)
+- `GET /api/templates/{filename}` - Return a supported document template's metadata, auto-derived field list, and raw markdown (404 if unknown). *(Renamed from `GET /api/documents/{filename}` in PL-7.)*
+- `POST /api/chat` - Advance the document-drafting conversation by one turn (**auth required**). Request carries `messages`, the current `documentType` (nullable), and the collected `fields`; returns the assistant `reply`, the resolved `documentType`, and a patch of `fields` (401 if unauthenticated, 503 if `OPENROUTER_API_KEY` is unset, 502 on LLM failure)
 
 ## Latest Update (2026-07-10)
 
-PL-6 is merged to `main` (PR #7). The app is now a Legal Document Creator supporting all 12 `catalog.json` types through a single document-type-aware chat: the assistant identifies the right document (redirecting unsupported requests to the closest supported one) and guides field collection. A startup registry parses the templates to auto-derive fields; non-NDA documents render via a generic template-fill preview/PDF while the Mutual NDA keeps its bespoke renderer via an adapter. Also shipped: focus returns to the chat input after each reply, and the assistant always asks a follow-up question when it needs more info. Verified end-to-end against the real OpenRouter/Cerebras key (unsupported-doc redirection, generic CSA field collection, and MNDA structured fields) plus a full Docker build; 63 frontend tests and 26 backend tests pass.
+PL-7 is merged to `main`. The app is now a **multi-user** Legal Document Creator: users sign up / sign in with real email-password accounts (bcrypt + JWT), the assistant chat is auth-gated, and generated documents can be saved and revisited from a "My Documents" history (session-lifetime, since the DB rebuilds on restart). The fake login screen is gone; a shared `apiFetch`/token layer backs the frontend, stale sessions auto-sign-out on a 401, and the brand palette + a persistent draft-only disclaimer give every screen a consistent SaaS look. The template-metadata endpoint moved to `GET /api/templates/{filename}` to free `/api/documents` for saved docs. Verified end-to-end in the Docker container (signup → auth-gated chat → save → My Documents) plus case-insensitive login; 43 backend tests and 84 frontend tests pass, with lint/typecheck/static build clean.
 
-Next up (not yet built): real authentication + `users` logic, and document persistence.
+Next up (not yet built): persistence that survives a restart, and account management (password reset, change/delete account).
