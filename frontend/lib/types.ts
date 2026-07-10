@@ -21,3 +21,20 @@ export interface NDAFormData {
   jurisdiction: string;
   modifications: string;
 }
+
+/** A flat, document-agnostic bag of collected field values, keyed by field name. */
+export type FieldsBag = Record<string, string>;
+
+export interface TemplateVariable {
+  name: string;
+  description?: string | null;
+}
+
+/** A supported document's metadata + raw template, from GET /api/documents/{filename}. */
+export interface DocumentTemplate {
+  filename: string;
+  name: string;
+  description: string;
+  variables: TemplateVariable[];
+  markdown: string;
+}

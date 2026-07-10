@@ -1,9 +1,16 @@
-"""AI chat integration for populating a Mutual NDA from a free-form conversation.
+"""AI chat integration for drafting any supported legal document from a
+free-form conversation.
 
-A single LLM call (LiteLLM -> OpenRouter -> openrouter/openai/gpt-oss-120b, pinned
-to Cerebras as the inference provider) returns a Structured Output containing both
-the assistant's reply and a patch of NDA field values to apply. There is no
-streaming: Cerebras is fast enough that one blocking call per turn is sufficient.
+A single LLM call per turn (LiteLLM -> OpenRouter -> openrouter/openai/gpt-oss-120b,
+pinned to Cerebras as the inference provider) returns a Structured Output with
+the assistant's reply, the document type it has settled on (if any), and a patch
+of field values to apply. There is no streaming: Cerebras is fast enough that one
+blocking call per turn is sufficient.
+
+The chat is document-type agnostic: the assistant first figures out which of the
+supported documents the user wants (redirecting unsupported requests to the
+closest supported one), then collects that document's fields. Field names come
+from the template registry, so the same code path drives all 12 documents.
 """
 
 from __future__ import annotations
@@ -15,6 +22,13 @@ from typing import Literal
 
 import litellm
 from pydantic import BaseModel, ValidationError
+
+from app.registry import (
+    MNDA_FILENAME,
+    MNDA_FILENAMES,
+    catalog_summary,
+    get_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,97 +51,134 @@ class LLMResponseError(RuntimeError):
     """Raised when the model's response cannot be turned into a ChatResponse."""
 
 
-class PartyPatch(BaseModel):
-    companyName: str | None = None
-    printName: str | None = None
-    title: str | None = None
-    noticeAddress: str | None = None
-
-
-class NdaFieldsPatch(BaseModel):
-    """A patch of NDA fields. Every field is optional; omitted fields are left
-    unchanged. Mirrors the frontend NDAFormData shape (camelCase on purpose)."""
-
-    partyA: PartyPatch | None = None
-    partyB: PartyPatch | None = None
-    purpose: str | None = None
-    effectiveDate: str | None = None
-    mndaTermType: Literal["duration", "untilTerminated"] | None = None
-    mndaTermDuration: str | None = None
-    confidentialityTermType: Literal["duration", "perpetual"] | None = None
-    confidentialityTermDuration: str | None = None
-    governingLaw: str | None = None
-    jurisdiction: str | None = None
-    modifications: str | None = None
-
-
-class ChatResponse(BaseModel):
-    """The single structured output returned by the model each turn."""
-
-    reply: str
-    fields: NdaFieldsPatch
-
-
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
 
 
-SYSTEM_PROMPT = """\
-You are a friendly legal-document assistant that helps a user draft a Mutual \
-Non-Disclosure Agreement (MNDA) based on the Common Paper standard MNDA. You do \
-this entirely through conversation instead of a form.
+class _FieldEntry(BaseModel):
+    """One field the model wants to set this turn. A name/value list (rather than
+    an open-ended object) keeps the response schema fixed, which strict Structured
+    Outputs requires."""
 
-Your job each turn is to (1) reply conversationally and (2) return a patch of any \
-NDA fields you can now fill in, based on what the user has told you.
+    name: str
+    value: str
 
-The fields you are gathering (return them under "fields"; use exactly these keys):
-- partyA / partyB: each an object with companyName, printName (signer's name), \
-title, noticeAddress.
-- purpose: what the parties will use the confidential information for.
-- effectiveDate: ISO date "YYYY-MM-DD".
-- mndaTermType: "duration" (the MNDA expires after a set time) or \
-"untilTerminated" (continues until terminated).
-- mndaTermDuration: e.g. "2 year(s)" — only meaningful when mndaTermType is \
-"duration".
-- confidentialityTermType: "duration" or "perpetual".
-- confidentialityTermDuration: e.g. "3 year(s)" — only meaningful when \
-confidentialityTermType is "duration".
-- governingLaw: a US state, e.g. "Delaware".
-- jurisdiction: the courts, e.g. "the state and federal courts located in New \
-Castle County, Delaware".
-- modifications: optional free-text changes to the standard terms.
 
-Guidelines:
+class _LLMChatResponse(BaseModel):
+    """The raw Structured Output shape requested from the model each turn."""
+
+    reply: str
+    documentType: str | None = None
+    fields: list[_FieldEntry] = []
+
+
+class ChatResponse(BaseModel):
+    """The sanitized response returned to the caller (and the HTTP client):
+    the reply, the resolved document filename (or null), and a field patch as a
+    plain dict. Omitted fields leave existing values unchanged on the client."""
+
+    reply: str
+    documentType: str | None = None
+    fields: dict[str, str] = {}
+
+
+_ROLE_PREAMBLE = """\
+You are a friendly legal-document assistant that helps a user draft a legal \
+agreement, entirely through conversation instead of a form. You work only from a \
+fixed catalog of supported document templates, shown below."""
+
+_SELECTION_RULES = """\
+Choosing the document:
+- First figure out which ONE of the supported documents above the user wants. \
+Ask what they are trying to accomplish if it is not yet clear.
+- Once you are confident, set "documentType" to that document's exact filename \
+(for any Non-Disclosure Agreement, always use "mutual-nda.md").
+- If the user asks for a document that is NOT in the list above (for example an \
+employment contract or a will), tell them plainly that you can't generate that \
+one, then offer the closest supported document from the list and ask if they'd \
+like to use it. Do not set "documentType" until they agree to a supported one."""
+
+_GENERAL_GUIDELINES = """\
+General guidelines:
 - Only include a field in the patch when you have a concrete value for it. Omit \
-fields you don't know yet (do not guess party names or dates).
-- You MAY proactively suggest sensible legal defaults (for example: Delaware \
-governing law with New Castle County courts, a 2-year MNDA term, a 3-year \
-confidentiality term), but present them as suggestions and let the user confirm \
-or change them before treating them as final. It is fine to fill a suggested \
-default into the patch once the user has agreed to it.
-- Ask about missing information conversationally, a few items at a time — do not \
-interrogate the user with one giant list.
-- Carry forward values that are already collected (shown below); only change a \
-field when the user asks you to.
-- When all required details are gathered (both company names, purpose, effective \
-date, governing law, jurisdiction, and the two term choices), let the user know \
-the document is ready to download.
-- Keep replies concise and warm."""
+fields you don't know yet (do not invent names, dates, or terms).
+- You MAY proactively suggest sensible legal defaults, but present them as \
+suggestions and let the user confirm or change them before treating them as \
+final.
+- Carry forward values already collected (shown below when a document is chosen); \
+only change a field when the user asks you to.
+- Keep replies concise and warm.
+- IMPORTANT: Whenever you still need more information to finish the document, you \
+MUST end your reply with a specific follow-up question about what you need next — \
+never leave the user without a clear question to answer. Only once every needed \
+field is filled should you instead tell them the document is ready to download."""
 
 
-def _render_current_fields(current_fields: NdaFieldsPatch) -> str:
-    filled = current_fields.model_dump(exclude_none=True)
-    if not filled:
+def _render_current_fields(fields: dict[str, str]) -> str:
+    if not fields:
         return "No fields have been collected yet."
-    return json.dumps(filled, indent=2)
+    return json.dumps(fields, indent=2)
+
+
+def build_system_prompt(document_type: str | None, fields: dict[str, str]) -> str:
+    parts = [_ROLE_PREAMBLE, "Supported documents:\n" + catalog_summary(), _SELECTION_RULES]
+
+    doc = get_document(document_type) if document_type else None
+    if doc is not None:
+        field_lines = "\n".join(
+            f"- {v.name}" + (f": {v.description}" if v.description else "")
+            for v in doc.variables
+        )
+        parts.append(
+            f"You are currently drafting: {doc.name} (documentType "
+            f'"{doc.filename}"). Keep documentType set to this unless the user '
+            f"clearly asks for a different document.\n\n"
+            "Collect these fields (return them under \"fields\" as name/value "
+            f"pairs, using exactly these names):\n{field_lines}\n\n"
+            "Ask about missing information a few items at a time — do not "
+            "interrogate the user with one giant list."
+        )
+        parts.append("Fields collected so far:\n" + _render_current_fields(fields))
+    else:
+        parts.append(
+            "No document has been chosen yet. Focus on identifying the right "
+            "document; do not collect fields until one is chosen."
+        )
+
+    parts.append(_GENERAL_GUIDELINES)
+    return "\n\n".join(parts)
+
+
+def _sanitize(raw: _LLMChatResponse, current_document_type: str | None) -> ChatResponse:
+    """Clamp the model output to known documents/fields so a hallucinated
+    document filename or field name can never corrupt state."""
+    document_type = current_document_type
+    if raw.documentType:
+        candidate = raw.documentType.strip()
+        if candidate in MNDA_FILENAMES:
+            document_type = MNDA_FILENAME
+        elif get_document(candidate) is not None:
+            document_type = candidate
+
+    fields: dict[str, str] = {}
+    doc = get_document(document_type) if document_type else None
+    if doc is not None:
+        known = {v.name for v in doc.variables}
+        for entry in raw.fields:
+            if entry.name in known and entry.value.strip():
+                fields[entry.name] = entry.value
+
+    return ChatResponse(reply=raw.reply, documentType=document_type, fields=fields)
 
 
 def generate_chat_response(
     messages: list[ChatMessage],
-    current_fields: NdaFieldsPatch,
+    document_type: str | None,
+    fields: dict[str, str],
 ) -> ChatResponse:
-    """Run one structured-output completion and return the reply + field patch.
+    """Run one structured-output completion and return the reply, resolved
+    document type, and a field patch.
 
     Raises LLMConfigError if OPENROUTER_API_KEY is not set. Any other failure
     (network, provider, parsing) propagates to the caller.
@@ -136,10 +187,7 @@ def generate_chat_response(
     if not api_key:
         raise LLMConfigError("OPENROUTER_API_KEY is not set")
 
-    system_content = (
-        f"{SYSTEM_PROMPT}\n\nFields collected so far:\n"
-        f"{_render_current_fields(current_fields)}"
-    )
+    system_content = build_system_prompt(document_type, fields)
     convo = [{"role": "system", "content": system_content}]
     convo += [{"role": m.role, "content": m.content} for m in messages]
 
@@ -147,7 +195,7 @@ def generate_chat_response(
         model=MODEL,
         messages=convo,
         api_key=api_key,
-        response_format=ChatResponse,
+        response_format=_LLMChatResponse,
         temperature=0.3,
         timeout=REQUEST_TIMEOUT_SECONDS,
         extra_body=PROVIDER_ROUTING,
@@ -158,7 +206,9 @@ def generate_chat_response(
         logger.error("LLM returned an empty response")
         raise LLMResponseError("The model returned an empty response.")
     try:
-        return ChatResponse.model_validate_json(content)
+        raw = _LLMChatResponse.model_validate_json(content)
     except ValidationError as exc:
         logger.error("Could not parse LLM structured output: %s", content[:1000])
         raise LLMResponseError("The model returned a malformed response.") from exc
+
+    return _sanitize(raw, document_type)

@@ -6,7 +6,7 @@ This is a SaaS product to allow users to draft legal agreements based on templat
 
 @catalog.json
 
-The current implementation on `main` has the Mutual NDA Creator driven by a free-form AI chat: the assistant asks about the document, gathers the fields conversationally, and populates a live preview that downloads as a PDF. The chat is backed by a `POST /api/chat` endpoint (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b` via Cerebras, Structured Outputs). This runs on the V1 technical foundation: a Dockerized FastAPI/uv backend, SQLite rebuilt on each start, start/stop scripts, and a fake login screen gating the app. The remaining 10 document types, real authentication, and document persistence have not been built yet.
+The current implementation on `main` is a Legal Document Creator driven by a free-form AI chat that supports all 12 document types in `catalog.json`: the assistant figures out which supported document the user wants (redirecting unsupported requests to the closest supported one), gathers the fields conversationally, and populates a live preview that downloads as a PDF. The chat is backed by a document-type-aware `POST /api/chat` endpoint (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b` via Cerebras, Structured Outputs). This runs on the V1 technical foundation: a Dockerized FastAPI/uv backend, SQLite rebuilt on each start, start/stop scripts, and a fake login screen gating the app. Real authentication and document persistence have not been built yet.
 
 ## Development process
 
@@ -83,19 +83,28 @@ scripts/stop-windows.ps1
 - Assistant suggests sensible legal defaults but confirms before finalizing; graceful in-chat error (503 when `OPENROUTER_API_KEY` is unset, 502 on any LLM failure) with the preview still usable
 - Still Mutual NDA only; `litellm` added to the backend; LLM logic isolated in `backend/app/llm.py`
 
+### PL-6 — ✅ Completed
+
+- Expanded from Mutual-NDA-only to **all 12 document types** in `catalog.json` via one document-type-aware `POST /api/chat`. The assistant conversationally identifies which supported document the user wants, redirects requests for unsupported types (e.g. an employment contract) to the closest supported one, and guides field collection
+- Startup **template registry** (`backend/app/registry.py`) parses `catalog.json` + `templates/*.md`, auto-deriving each document's fields from the `<span class="..._link">Label</span>` markers (with possessive/plural normalization). The Mutual NDA keeps an explicit field set so its bespoke renderer is unchanged
+- The chat response is now `{reply, documentType, fields}`; the model returns a schema-safe `list[{name,value}]` that the backend sanitizes (clamping `documentType`/field names to the registry) into a field patch
+- New `GET /api/documents/{filename}` serves a document's metadata, field list, and raw template so the frontend can render a **generic template-fill preview + PDF** (`GenericPreview`/`GenericPdfDocument`) for the 11 non-NDA docs; the Mutual NDA keeps its bespoke `NDAPreview`/`NdaPdfDocument` via a deterministic bag→`NDAFormData` adapter. `NdaCreator` was replaced by `DocumentCreator`
+- **Two fixes shipped with PL-6:** focus returns to the chat input after every assistant reply (success or error); the assistant always ends with a follow-up question when it still needs information (system-prompt rule)
+- Fixed the `Dockerfile` to copy `catalog.json` + `templates/` into the image (the registry reads them at startup)
+
 ### ⬜ Not yet built
 
 - Real authentication (signup/signin/signout, JWT, password hashing) and the `users` table logic
-- Support for the other 10 document types from catalog.json
 - Document persistence (save/load/delete)
 
 ## Current API Endpoints
 
 - `GET /api/health` - Health check
-- `POST /api/chat` - Advance the NDA-drafting conversation by one turn; returns the assistant reply and a patch of NDA fields (503 if `OPENROUTER_API_KEY` is unset, 502 on LLM failure)
+- `GET /api/documents/{filename}` - Return a supported document's metadata, auto-derived field list, and raw template (404 if unknown)
+- `POST /api/chat` - Advance the document-drafting conversation by one turn. Request carries `messages`, the current `documentType` (nullable), and the collected `fields`; returns the assistant `reply`, the resolved `documentType`, and a patch of `fields` (503 if `OPENROUTER_API_KEY` is unset, 502 on LLM failure)
 
 ## Latest Update (2026-07-10)
 
-PL-5 is merged to `main`. The Mutual NDA Creator is now driven by a free-form AI chat instead of a manual form: the frontend `ChatPanel` POSTs the conversation + current field state to `POST /api/chat`, which makes one structured-output call (LiteLLM → OpenRouter `openrouter/openai/gpt-oss-120b`, Cerebras-pinned, no streaming) returning the assistant reply and a field patch; the existing live preview and PDF download are reused unchanged. `NDAForm` was removed (chat-only, no manual fallback). Verified end-to-end against the real OpenRouter/Cerebras key (function, HTTP route, and a browser smoke test) plus a full Docker rebuild/run; 52 frontend tests and 11 backend tests pass.
+PL-6 is complete (branch `pl-6-all-document-types`). The app is now a Legal Document Creator supporting all 12 `catalog.json` types through a single document-type-aware chat: the assistant identifies the right document (redirecting unsupported requests to the closest supported one) and guides field collection. A startup registry parses the templates to auto-derive fields; non-NDA documents render via a generic template-fill preview/PDF while the Mutual NDA keeps its bespoke renderer via an adapter. Also shipped: focus returns to the chat input after each reply, and the assistant always asks a follow-up question when it needs more info. Verified end-to-end against the real OpenRouter/Cerebras key (unsupported-doc redirection, generic CSA field collection, and MNDA structured fields) plus a full Docker build; 63 frontend tests and 26 backend tests pass.
 
-Next up (not yet built): real authentication + `users` logic, the other 10 document types, and document persistence.
+Next up (not yet built): real authentication + `users` logic, and document persistence.

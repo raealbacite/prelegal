@@ -1,58 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mergeFieldsPatch, sendChat } from "@/lib/chat";
-import { createDefaultFormData } from "@/lib/ndaDefaults";
+import { mergeFields, sendChat } from "@/lib/chat";
 
-describe("mergeFieldsPatch", () => {
-  it("applies scalar and nested party values", () => {
-    const current = createDefaultFormData();
-    const merged = mergeFieldsPatch(current, {
-      partyA: { companyName: "Acme Corp" },
-      governingLaw: "Delaware",
-    });
-
-    expect(merged.partyA.companyName).toBe("Acme Corp");
-    expect(merged.governingLaw).toBe("Delaware");
+describe("mergeFields", () => {
+  it("overlays non-blank patch values onto the current bag", () => {
+    const merged = mergeFields({ Customer: "Acme" }, { Provider: "Globex" });
+    expect(merged).toEqual({ Customer: "Acme", Provider: "Globex" });
   });
 
-  it("ignores null and omitted fields so existing values survive", () => {
-    const current = createDefaultFormData();
-    current.governingLaw = "Delaware";
-
-    const merged = mergeFieldsPatch(current, {
-      governingLaw: null,
-      partyA: null,
-      jurisdiction: "New Castle County, Delaware",
-    });
-
-    expect(merged.governingLaw).toBe("Delaware");
-    expect(merged.jurisdiction).toBe("New Castle County, Delaware");
+  it("keeps existing values for keys not in the patch", () => {
+    const merged = mergeFields({ Customer: "Acme" }, { Provider: "Globex" });
+    expect(merged.Customer).toBe("Acme");
   });
 
-  it("merges only the provided party keys and preserves the rest", () => {
-    const current = createDefaultFormData();
-    current.partyA.companyName = "Acme Corp";
-
-    const merged = mergeFieldsPatch(current, {
-      partyA: { printName: "Jane Doe", title: null },
-    });
-
-    expect(merged.partyA.companyName).toBe("Acme Corp");
-    expect(merged.partyA.printName).toBe("Jane Doe");
-    expect(merged.partyA.title).toBe("");
+  it("ignores blank patch values", () => {
+    const merged = mergeFields({ Customer: "Acme" }, { Customer: "   " });
+    expect(merged.Customer).toBe("Acme");
   });
 
-  it("does not mutate the original data", () => {
-    const current = createDefaultFormData();
-    mergeFieldsPatch(current, { partyA: { companyName: "Acme Corp" } });
-    expect(current.partyA.companyName).toBe("");
-  });
-
-  it("applies term-type enum values", () => {
-    const current = createDefaultFormData();
-    const merged = mergeFieldsPatch(current, {
-      confidentialityTermType: "perpetual",
-    });
-    expect(merged.confidentialityTermType).toBe("perpetual");
+  it("does not mutate the original bag", () => {
+    const current = { Customer: "Acme" };
+    mergeFields(current, { Provider: "Globex" });
+    expect(current).toEqual({ Customer: "Acme" });
   });
 });
 
@@ -61,10 +29,11 @@ describe("sendChat", () => {
     vi.restoreAllMocks();
   });
 
-  it("posts messages and fields and returns the parsed response", async () => {
+  it("posts messages, document type, and fields and returns the parsed response", async () => {
     const apiResponse = {
       reply: "Got it.",
-      fields: { partyA: { companyName: "Acme Corp" } },
+      documentType: "csa.md",
+      fields: { Customer: "Acme Corp" },
     };
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -72,16 +41,20 @@ describe("sendChat", () => {
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    const data = createDefaultFormData();
-    const result = await sendChat([{ role: "user", content: "Party A is Acme Corp" }], data);
+    const result = await sendChat(
+      [{ role: "user", content: "cloud service agreement please" }],
+      "csa.md",
+      { Customer: "Acme Corp" },
+    );
 
     expect(result).toEqual(apiResponse);
     const [url, options] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/chat");
     expect(options.method).toBe("POST");
     const body = JSON.parse(options.body);
-    expect(body.messages[0].content).toBe("Party A is Acme Corp");
-    expect(body.fields).toEqual(data);
+    expect(body.messages[0].content).toBe("cloud service agreement please");
+    expect(body.documentType).toBe("csa.md");
+    expect(body.fields).toEqual({ Customer: "Acme Corp" });
   });
 
   it("throws the backend detail message on an error response", async () => {
@@ -93,9 +66,9 @@ describe("sendChat", () => {
       })) as unknown as typeof fetch,
     );
 
-    await expect(
-      sendChat([{ role: "user", content: "hi" }], createDefaultFormData()),
-    ).rejects.toThrow("The AI assistant is not configured.");
+    await expect(sendChat([{ role: "user", content: "hi" }], null, {})).rejects.toThrow(
+      "The AI assistant is not configured.",
+    );
   });
 
   it("throws a connection error when fetch rejects", async () => {
@@ -106,8 +79,8 @@ describe("sendChat", () => {
       }) as unknown as typeof fetch,
     );
 
-    await expect(
-      sendChat([{ role: "user", content: "hi" }], createDefaultFormData()),
-    ).rejects.toThrow(/Couldn't reach the assistant/);
+    await expect(sendChat([{ role: "user", content: "hi" }], null, {})).rejects.toThrow(
+      /Couldn't reach the assistant/,
+    );
   });
 });

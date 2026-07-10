@@ -1,31 +1,41 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { NDAFormData } from "@/lib/types";
-import { ChatMessage, mergeFieldsPatch, sendChat } from "@/lib/chat";
+import { FieldsBag } from "@/lib/types";
+import { ChatMessage, ChatTurnResult, sendChat } from "@/lib/chat";
 
 interface ChatPanelProps {
-  data: NDAFormData;
-  onChange: (data: NDAFormData) => void;
+  documentType: string | null;
+  fields: FieldsBag;
+  onResult: (result: ChatTurnResult) => void;
 }
 
 const GREETING: ChatMessage = {
   role: "assistant",
   content:
-    "Hi! I'll help you put together a Mutual NDA through a quick chat. To start, who are the two parties (their company names), and what will you be sharing confidential information for?",
+    "Hi! I can help you draft a legal agreement. Tell me what you're trying to do — for example a mutual NDA, a cloud service agreement, or a data processing agreement — and I'll figure out the right document and fill it in with you.",
 };
 
-export default function ChatPanel({ data, onChange }: ChatPanelProps) {
+export default function ChatPanel({ documentType, fields, onResult }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const hasSent = useRef(false);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isSending]);
+
+  // Return focus to the input once a turn finishes (the textarea is disabled
+  // while sending, so we wait for the re-enable render rather than focusing in
+  // handleSubmit). Covers both success and error, so the user can keep typing.
+  useEffect(() => {
+    if (!isSending && hasSent.current) inputRef.current?.focus();
+  }, [isSending]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -37,11 +47,12 @@ export default function ChatPanel({ data, onChange }: ChatPanelProps) {
     setInput("");
     setError(null);
     setIsSending(true);
+    hasSent.current = true;
 
     try {
-      const response = await sendChat(conversation, data);
-      setMessages((prev) => [...prev, { role: "assistant", content: response.reply }]);
-      onChange(mergeFieldsPatch(data, response.fields));
+      const result = await sendChat(conversation, documentType, fields);
+      setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
+      onResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -74,6 +85,7 @@ export default function ChatPanel({ data, onChange }: ChatPanelProps) {
 
       <form onSubmit={handleSubmit} className="flex items-end gap-2 border-t border-zinc-300 p-3 dark:border-zinc-700">
         <textarea
+          ref={inputRef}
           aria-label="Message"
           className="min-h-[2.5rem] w-full resize-none rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
           rows={1}
